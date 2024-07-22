@@ -1,0 +1,22 @@
+1. Buat env baru
+conda create --name ollama python=3.9.0
+conda activate ollama
+
+2. Install langchain
+pip install langchain langchain_community
+pip install flask
+pip install transformers
+pip install youtube_transcript_api
+pip install tensorflow
+pip install tf-keras
+pip install sentencepiece
+pip install pandas
+pip install unstructured langchain
+pip install "unstructured[all-docs]"
+pip install chromadb
+pip install langchain-text-splitters
+
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+RUN OLLAMA
+ollama run llama3 
