@@ -1,30 +1,21 @@
 from flask import Flask, request, jsonify
-# from langchain_community.document_loaders import OnlinePDFLoader, UnstructuredPDFLoader
-# from langchain_text_splitters import RecursiveCharacterTextSplitter
-# from langchain_community.vectorstores import Chroma
-# from langchain_community.embeddings import OllamaEmbeddings
-# from langchain.prompts import ChatPromptTemplate, PromptTemplate
-# from langchain_core.output_parsers import StrOutputParser
-# from langchain_community.llms import Ollama
-# from langchain_core.runnables import RunnablePassthrough
-# from langchain.retrievers.multi_query import MultiQueryRetriever
-# from transformers import TFT5ForConditionalGeneration, T5Tokenizer, pipeline
-# from youtube_transcript_api import YouTubeTranscriptApi
-# from langchain.docstore.document import Document
 import requests
 import uuid
 import os
-import json
-
 import re
-
-
-
-
 from flask import Flask, request, jsonify
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 from torch.cuda.amp import autocast, GradScaler
+from langchain.docstore.document import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import UnstructuredPDFLoader
+from youtube_transcript_api import YouTubeTranscriptApi
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.chat_models import ChatOllama
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
+from langchain_community.vectorstores import FAISS
 
 scaler = GradScaler()
 
@@ -32,7 +23,6 @@ app = Flask(__name__)
 
 # Initialize vector_db globally
 vector_db = None
-
 
 # Load the fine-tuned model for material & quiz generation
 materialQuiz_model, materialQuiz_tokenizer = FastLanguageModel.from_pretrained(
@@ -48,6 +38,12 @@ materialQuiz_tokenizer = get_chat_template(
     mapping={"role": "from", "content": "value", "user": "human", "assistant": "gpt"},  # ShareGPT style
 )
 
+local_model = "phi3:latest"
+llm = ChatOllama(model=local_model)
+
+# Context Length Encoder Model
+from transformers import AutoModel
+nomic_embed_text = AutoModel.from_pretrained("nomic-ai/nomic-embed-text-v1", trust_remote_code=True)
 
 # Function to load and process online PDFs
 def load_and_process_online_pdf(url):
@@ -79,9 +75,6 @@ def load_and_process_online_pdf(url):
 def youtube_get_context(video_url):
 
     video_id = video_url.split("=")[1]
-    print("PRINT YOUTUBE BOS: ")
-    print(video_url)
-
     transcript = YouTubeTranscriptApi.get_transcript(video_id)
     text = " ".join([d["text"] for d in transcript]) 
 
@@ -104,39 +97,40 @@ def preprocess_quiz(data):
         lines = match.strip().split('\n')
         question_text = lines[0].split(": ", 1)[1].strip()
 
-        choices = {}
+        choices = []
         answer_key_line = None
+        question_text = lines[0]
 
         for line in lines[1:]:
             if re.match(r'^[a-z]\)', line):
                 key, value = line.split(')', 1)
-                choices[key.strip()] = value.strip()
+                choices.append({"letter": key.strip().upper(), "answer": value.strip()})
             elif line.startswith("Answer Key:"):
                 answer_key_line = line
                 break
 
         if answer_key_line is None:
             print(f"Error: Answer key not found for question: {question_text}")
-            continue
+        else:
+            answer_key = answer_key_line.split("Answer Key: ", 1)[1].strip().upper()
 
-        answer_key = answer_key_line.split("Answer Key: ", 1)[1].split(") ")[0]
-
-        output["questions"].append({
-            "question": question_text,
-            "choices": choices,
-            "answer_key": answer_key
-        })
+            output["questions"].append({
+                "question": question_text,
+                "choices": choices,
+                "key": answer_key[0]
+            })
 
     return output["questions"]
 
 def generate_quiz(material):
     print("generating quiz..")
+    print(material)
 
     # Define the prompt template
     prompt = f"""
         Given the following material.
         Material:
-        How to Make Pancake - Introduction to Pancake
+        {material}
 
         ====================================================
 
@@ -212,23 +206,14 @@ def query():
     print("Start querying")
     global vector_db
 
-    # data = request.json
-    # question = data.get('topic', '')
-    # pdf_urls = data.get('pdf_urls', [])
-    # youtube_urls = data.get('youtube_urls', [])
-
     # Extract Data from request
     data = request.json
-    courseName = data.get('courseName', '')
+    courseName = data.get('name', '')
     description = data.get('description', '')
     chapters = data.get('content', [])
     pdf_urls = data.get('pdf_urls', [])
     youtube_urls = data.get('youtube_urls', [])
     course_content = []
-
-
-    # Chapters
-    # [{'chapter': 1, 'title': 'Introduction to Pancakes'}, {'chapter': 2, 'title': 'Basic Pancake Recipe'}, {'chapter': 3, 'title': 'Variations and Toppings'}, {'chapter': 4, 'title': 'Cooking Techniques'}, {'chapter': 5, 'title': 'Serving and Presentation'}]
 
     for chapter in chapters:
 
@@ -239,81 +224,87 @@ def query():
         chapter_title = chapter['title']
         topicPrompt = f"Topic: {courseName} - {chapter_title}"
 
-        # Jika 
         all_chunks = []
         if pdf_urls or youtube_urls:
             for url in pdf_urls:
                 all_chunks.extend(load_and_process_online_pdf(url))
             
-        #     youtube_summaries = []
-        #     for url in youtube_urls:
-        #         youtube_summaries.append(youtube_get_context(url))
-
-        #     print("PRINT NI BOS: ")
-        #     print(youtube_summaries)
+            youtube_summaries = []
+            for url in youtube_urls:
+                youtube_summaries.append(youtube_get_context(url))
             
-        #     # Add summarized YouTube content as a single document
-        #     youtube_doc_content  = "\n".join(youtube_summaries)
+            # Add summarized YouTube content as a single document
+            youtube_doc_content  = "\n".join(youtube_summaries)
             
-        #     # Membuat youtube_doc dalam format Document
-        #     youtube_doc = [Document(page_content=youtube_doc_content, metadata={})]
+            # Membuat youtube_doc dalam format Document
+            youtube_doc = [Document(page_content=youtube_doc_content, metadata={})]
 
-        #     # Menggunakan text_splitter pada youtube_doc
-        #     text_splitter = RecursiveCharacterTextSplitter(chunk_size=7500, chunk_overlap=100)
-        #     youtube_chunks = text_splitter.split_documents(youtube_doc)
+            # Menggunakan text_splitter pada youtube_doc
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=7500, chunk_overlap=100)
+            youtube_chunks = text_splitter.split_documents(youtube_doc)
 
-        #     all_chunks.extend(youtube_chunks)
+            all_chunks.extend(youtube_chunks)
+            retriever = FAISS.from_documents(all_chunks, OllamaEmbeddings(model="nomic-embed-text", show_progress=True)).as_retriever()
 
-        #     # Add to vector database
-        #     vector_db = Chroma.from_documents(
-        #         documents=all_chunks, 
-        #         embedding=OllamaEmbeddings(model="nomic-embed-text", show_progress=True),
-        #         collection_name="local-rag"
-        #     )
+        if all_chunks:
 
-        # if vector_db:
-        #     QUERY_PROMPT = PromptTemplate(
-        #         input_variables=["question"],
-        #         template="""You are an AI language model assistant. Your task is to generate five
-        #         different versions of the given user question to retrieve relevant documents from
-        #         a vector database. By generating multiple perspectives on the user question, your
-        #         goal is to help the user overcome some of the limitations of the distance-based
-        #         similarity search. Provide these alternative questions separated by newlines.
-        #         Original question: {question}""",
-        #     )
+            compressor = LLMChainExtractor.from_llm(llm)
+            compression_retriever = ContextualCompressionRetriever(
+                base_compressor=compressor, base_retriever=retriever
+            )
+            
+            context_template = f"""Generate a short (200 words) summary of topic: {topicPrompt}"""
 
-        #     retriever = MultiQueryRetriever.from_llm(
-        #         vector_db.as_retriever(), 
-        #         llm,
-        #         prompt=QUERY_PROMPT
-        #     )
+            compressed_docs = compression_retriever.invoke(context_template)
 
-        #     template = """ 
-        #     Topic(Must Have): {question}
-        #     additional resource: {context}
-        #     Format: Markdown
+            context = "\n\n".join(doc.page_content for doc in compressed_docs)
 
-        #     Explain, with comprehensive detail and example of '{question}' in 2000 words, use proper markdown format (Title, Heading, etc). 
-        #     Prioritize to generate the Explanation on {question}. 
-        #     include additional resource ONLY if related to the Topic.
-        #     Dont provide Table of Contents
+            if len(context) > 150:
+                context = context[:150]
 
-        #     """
+            prompt = f""" 
+            Topic(Must Have): {topicPrompt}
+            additional resource: {context}
+            Format: Markdown
 
-        #     prompt = ChatPromptTemplate.from_template(template)
+            Explain, with comprehensive detail and example of '{topicPrompt}' in 2000 words, use proper markdown format (Title, Heading, etc). 
+            Prioritize to generate the Explanation on {topicPrompt}. 
+            include additional resource ONLY if related to the Topic.
+            Dont provide Table of Contents
 
-        #     chain = (
-        #         {"context": retriever, "question": RunnablePassthrough()}
-        #         | prompt
-        #         | llm
-        #         | StrOutputParser()
-        #     )
+            """
 
-        #     out = chain.invoke(question)
+            FastLanguageModel.for_inference(materialQuiz_model)  # Enable native 2x faster inference
 
+            messages = [
+                {"from": "human", "value": prompt}
+            ]
 
+            inputs = materialQuiz_tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,  # Must add for generation
+                return_tensors="pt",
+            ).to("cuda")
 
+            with autocast():
+                outputs = materialQuiz_model.generate(input_ids=inputs, max_new_tokens=2000, use_cache=True)
 
+            decoded_output = materialQuiz_tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+            # Extract the part of the output that follows the user prompt
+            user_prompt = messages[0]["value"]
+            output_text = decoded_output[0].split(user_prompt, 1)[-1].strip()
+
+            # Generate quiz & Final JSON
+            quiz = generate_quiz(topicPrompt)
+
+            course_content.append({
+                "chapter": chapter_number,
+                "title": chapter_title,
+                "text": output_text,
+                "quiz": quiz
+            })
             
         else:
             prompt = f"""Explain, with comprehensive detail and example of '{topicPrompt}' in 2000 words, use proper markdown format (Title, Heading, etc). Dont provide Table of Contents"""
@@ -331,7 +322,9 @@ def query():
                 return_tensors="pt",
             ).to("cuda")
 
-            outputs = materialQuiz_model.generate(input_ids=inputs, max_new_tokens=2000, use_cache=True)
+            with autocast():
+                outputs = materialQuiz_model.generate(input_ids=inputs, max_new_tokens=2000, use_cache=True)
+
             decoded_output = materialQuiz_tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
             # Extract the part of the output that follows the user prompt
@@ -339,7 +332,7 @@ def query():
             output_text = decoded_output[0].split(user_prompt, 1)[-1].strip()
 
             # Generate quiz & Final JSON
-            quiz = generate_quiz(output_text)
+            quiz = generate_quiz(topicPrompt)
 
             course_content.append({
                 "chapter": chapter_number,
@@ -350,7 +343,7 @@ def query():
 
         
     final_output = {
-        "courseName": courseName,
+        "name": courseName,
         "description": description,
         "pdf_urls": pdf_urls,
         "youtube_urls": youtube_urls,
@@ -359,7 +352,6 @@ def query():
 
     # return json.dumps(final_output)
     return jsonify(final_output)
-
 
 
 if __name__ == '__main__':
