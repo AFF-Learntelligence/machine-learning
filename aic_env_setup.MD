@@ -36,7 +36,6 @@ pip install flask \
 pip install langchain langchain_community \
 pip install youtube_transcript_api \
 pip install einops \
-pip install chromadb \
 pip install faiss-gpu
 
 
