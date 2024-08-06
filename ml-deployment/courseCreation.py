@@ -116,13 +116,13 @@ def preprocess_quiz(data, lang):
             print(f"Error: Answer key not found for question: {question_text}")
         else:
             answer_key = answer_key_line.split("Answer Key: ", 1)[1].strip().upper()
-            for choice in choices:
-                choice['answer'] = translate_to_indonesia(choice['answer'])
 
             # Translate output text to Indonesia
             if lang == ('id'):
                 question_text = translate_to_indonesia(question_text)
                 answer_key = translate_to_indonesia(answer_key)
+                for choice in choices:
+                    choice['answer'] = translate_to_indonesia(choice['answer'])
 
             output["questions"].append({
                 "question": question_text,
