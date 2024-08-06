@@ -16,6 +16,9 @@ from langchain_community.chat_models import ChatOllama
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
 from langchain_community.vectorstores import FAISS
+from deep_translator import GoogleTranslator
+
+
 
 scaler = GradScaler()
 
@@ -80,7 +83,7 @@ def youtube_get_context(video_url):
 
     return text
 
-def preprocess_quiz(data):
+def preprocess_quiz(data, lang):
     print("Preprocessing Quiz...")
 
     data = data.replace("**", "")
@@ -113,6 +116,13 @@ def preprocess_quiz(data):
             print(f"Error: Answer key not found for question: {question_text}")
         else:
             answer_key = answer_key_line.split("Answer Key: ", 1)[1].strip().upper()
+            for choice in choices:
+                choice['answer'] = translate_to_indonesia(choice['answer'])
+
+            # Translate output text to Indonesia
+            if lang == ('id'):
+                question_text = translate_to_indonesia(question_text)
+                answer_key = translate_to_indonesia(answer_key)
 
             output["questions"].append({
                 "question": question_text,
@@ -122,7 +132,7 @@ def preprocess_quiz(data):
 
     return output["questions"]
 
-def generate_quiz(material):
+def generate_quiz(material, lang):
     print("generating quiz..")
     print(material)
 
@@ -173,6 +183,7 @@ def generate_quiz(material):
         Answer Key:
 
         """
+
     FastLanguageModel.for_inference(materialQuiz_model)  # Enable native 2x faster inference
 
     messages = [
@@ -196,9 +207,42 @@ def generate_quiz(material):
     user_prompt = messages[0]["value"]
     output_text = decoded_output[0].split(user_prompt, 1)[-1].strip()
 
-    json_output = preprocess_quiz(output_text)
+    json_output = preprocess_quiz(output_text, lang)
     
     return json_output
+
+def translate_to_indonesia(text):
+    def split_text(text, limit):
+        """
+        Memecah teks menjadi bagian yang lebih kecil dengan batas karakter tertentu.
+        """
+        sentences = text.split('. ')
+        chunks = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= limit:
+                current_chunk += sentence + '. '
+            else:
+                chunks.append(current_chunk.strip())
+                current_chunk = sentence + '. '
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+
+    chunks = split_text(text, 500)
+
+    translator = GoogleTranslator(source='auto', target='id')
+
+    translated_chunks = []
+    for chunk in chunks:
+        translated_chunk = translator.translate(chunk)
+        translated_chunks.append(translated_chunk)
+
+    translated_text = ' '.join(translated_chunks)
+    return translated_text
 
 
 @app.route('/query', methods=['POST'])
@@ -213,6 +257,7 @@ def query():
     chapters = data.get('content', [])
     pdf_urls = data.get('pdf_urls', [])
     youtube_urls = data.get('youtube_urls', [])
+    lang = data.get('lang', '')
     course_content = []
 
     for chapter in chapters:
@@ -308,7 +353,7 @@ def query():
             
         else:
             prompt = f"""Explain, with comprehensive detail and example of '{topicPrompt}' in 2000 words, use proper markdown format (Title, Heading, etc). Dont provide Table of Contents"""
-
+            
             FastLanguageModel.for_inference(materialQuiz_model)  # Enable native 2x faster inference
 
             messages = [
@@ -332,12 +377,23 @@ def query():
             output_text = decoded_output[0].split(user_prompt, 1)[-1].strip()
 
             # Generate quiz & Final JSON
-            quiz = generate_quiz(topicPrompt)
+            quiz = generate_quiz(topicPrompt, lang)
+
+            # Translate output text to Indonesia
+            if lang == ('id'):
+                translated_text = translate_to_indonesia(output_text)
+
+            # course_content.append({
+            #     "chapter": chapter_number,
+            #     "title": chapter_title,
+            #     "text": output_text,
+            #     "quiz": quiz
+            # })
 
             course_content.append({
                 "chapter": chapter_number,
                 "title": chapter_title,
-                "text": output_text,
+                "text": translated_text,
                 "quiz": quiz
             })
 
@@ -349,6 +405,9 @@ def query():
         "youtube_urls": youtube_urls,
         "content": course_content
     }
+
+    # Translate to Indo
+
 
     # return json.dumps(final_output)
     return jsonify(final_output)
