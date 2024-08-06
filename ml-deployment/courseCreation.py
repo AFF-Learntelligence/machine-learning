@@ -304,8 +304,8 @@ def query():
 
             context = "\n\n".join(doc.page_content for doc in compressed_docs)
 
-            if len(context) > 150:
-                context = context[:150]
+            if len(context) > 200:
+                context = context[:200]
 
             prompt = f""" 
             Topic(Must Have): {topicPrompt}
