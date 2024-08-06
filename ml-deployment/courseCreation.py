@@ -381,7 +381,7 @@ def query():
 
             # Translate output text to Indonesia
             if lang == ('id'):
-                translated_text = translate_to_indonesia(output_text)
+                output_text = translate_to_indonesia(output_text)
 
             # course_content.append({
             #     "chapter": chapter_number,
@@ -393,7 +393,7 @@ def query():
             course_content.append({
                 "chapter": chapter_number,
                 "title": chapter_title,
-                "text": translated_text,
+                "text": output_text,
                 "quiz": quiz
             })
 
