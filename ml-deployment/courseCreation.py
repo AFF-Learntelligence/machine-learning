@@ -260,6 +260,28 @@ def query():
     lang = data.get('lang', '')
     course_content = []
 
+    all_chunks = []
+    if pdf_urls or youtube_urls:
+        for url in pdf_urls:
+            all_chunks.extend(load_and_process_online_pdf(url))
+            
+        youtube_summaries = []
+        for url in youtube_urls:
+            youtube_summaries.append(youtube_get_context(url))
+            
+        # Add summarized YouTube content as a single document
+        youtube_doc_content  = "\n".join(youtube_summaries)
+            
+        # Membuat youtube_doc dalam format Document
+        youtube_doc = [Document(page_content=youtube_doc_content, metadata={})]
+
+        # Menggunakan text_splitter pada youtube_doc
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=7500, chunk_overlap=100)
+        youtube_chunks = text_splitter.split_documents(youtube_doc)
+
+        all_chunks.extend(youtube_chunks)
+        retriever = FAISS.from_documents(all_chunks, OllamaEmbeddings(model="nomic-embed-text", show_progress=True)).as_retriever()
+
     for chapter in chapters:
 
         print("CHAPTER:")
@@ -269,27 +291,6 @@ def query():
         chapter_title = chapter['title']
         topicPrompt = f"Topic: {courseName} - {chapter_title}"
 
-        all_chunks = []
-        if pdf_urls or youtube_urls:
-            for url in pdf_urls:
-                all_chunks.extend(load_and_process_online_pdf(url))
-            
-            youtube_summaries = []
-            for url in youtube_urls:
-                youtube_summaries.append(youtube_get_context(url))
-            
-            # Add summarized YouTube content as a single document
-            youtube_doc_content  = "\n".join(youtube_summaries)
-            
-            # Membuat youtube_doc dalam format Document
-            youtube_doc = [Document(page_content=youtube_doc_content, metadata={})]
-
-            # Menggunakan text_splitter pada youtube_doc
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=7500, chunk_overlap=100)
-            youtube_chunks = text_splitter.split_documents(youtube_doc)
-
-            all_chunks.extend(youtube_chunks)
-            retriever = FAISS.from_documents(all_chunks, OllamaEmbeddings(model="nomic-embed-text", show_progress=True)).as_retriever()
 
         if all_chunks:
 
@@ -405,8 +406,6 @@ def query():
         "youtube_urls": youtube_urls,
         "content": course_content
     }
-
-    # Translate to Indo
 
 
     # return json.dumps(final_output)
