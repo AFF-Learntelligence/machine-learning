@@ -244,6 +244,10 @@ def translate_to_indonesia(text):
     translated_text = ' '.join(translated_chunks)
     return translated_text
 
+def translate_to_english(text):
+    id_translator = GoogleTranslator(source='id', target='en')
+    return id_translator.translate(text)
+
 
 @app.route('/query', methods=['POST'])
 def query():
@@ -259,6 +263,12 @@ def query():
     youtube_urls = data.get('youtube_urls', [])
     lang = data.get('lang', '')
     course_content = []
+
+    # Translate courseName dana chapters if indonesia
+    if lang == ('id'):
+        courseName = translate_to_english(courseName)
+        for chapter in chapters:
+            chapter['title'] = translate_to_english(chapter['title'])
 
     all_chunks = []
     if pdf_urls or youtube_urls:
