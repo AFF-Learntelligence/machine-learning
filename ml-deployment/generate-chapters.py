@@ -1,6 +1,40 @@
 from flask import Flask, request, jsonify
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
+from deep_translator import GoogleTranslator
+
+def translate_to_indonesia(text):
+    def split_text(text, limit):
+        """
+        Memecah teks menjadi bagian yang lebih kecil dengan batas karakter tertentu.
+        """
+        sentences = text.split('. ')
+        chunks = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= limit:
+                current_chunk += sentence + '. '
+            else:
+                chunks.append(current_chunk.strip())
+                current_chunk = sentence + '. '
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+
+    chunks = split_text(text, 500)
+
+    translator = GoogleTranslator(source='auto', target='id')
+
+    translated_chunks = []
+    for chunk in chunks:
+        translated_chunk = translator.translate(chunk)
+        translated_chunks.append(translated_chunk)
+
+    translated_text = ' '.join(translated_chunks)
+    return translated_text
 
 app = Flask(__name__)
 
@@ -24,6 +58,8 @@ def generate_chapters():
     json_content = request.json
     course_title = json_content.get("course_title")
     course_length = json_content.get("course_length")
+    lang = json_content.get('lang', '')
+    
     
     prompt = f""""
     List {course_length} chapter name for a course '{course_title}'. 
@@ -60,10 +96,20 @@ def generate_chapters():
     chapters = [f"Chapter {chapter}" for chapter in chapters]
     
     # Format the output to the required structure
-    formatted_chapters = [
-        {"chapter": int(chapter.split(":")[0].split()[1]), "title": chapter.split(":")[1].strip()}
-        for chapter in chapters
-    ]
+
+    if lang == ('id'):
+        formatted_chapters = [
+            {"chapter": int(chapter.split(":")[0].split()[1]), "title": translate_to_indonesia(chapter.split(":")[1].strip())}
+            for chapter in chapters
+        ]
+    
+    else:
+        formatted_chapters = [
+            {"chapter": int(chapter.split(":")[0].split()[1]), "title": chapter.split(":")[1].strip()}
+            for chapter in chapters
+        ]
+
+    
 
     response_answer = {"data": formatted_chapters}
     return jsonify(response_answer)
