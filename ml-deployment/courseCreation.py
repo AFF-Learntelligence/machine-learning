@@ -355,6 +355,10 @@ def query():
             # Generate quiz & Final JSON
             quiz = generate_quiz(topicPrompt)
 
+            # Translate output text to Indonesia
+            if lang == ('id'):
+                output_text = translate_to_indonesia(output_text)
+
             course_content.append({
                 "chapter": chapter_number,
                 "title": chapter_title,
