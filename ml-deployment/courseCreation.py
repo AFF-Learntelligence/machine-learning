@@ -118,11 +118,11 @@ def preprocess_quiz(data, lang):
             answer_key = answer_key_line.split("Answer Key: ", 1)[1].strip().upper()
 
             # Translate output text to Indonesia
-            if lang == ('id'):
-                question_text = translate_to_indonesia(question_text)
-                answer_key = translate_to_indonesia(answer_key)
+            if lang == 'id':
+                question_text = translate_to_indonesia_short(question_text)
+                # answer_key = translate_to_indonesia(answer_key)
                 for choice in choices:
-                    choice['answer'] = translate_to_indonesia(choice['answer'])
+                    choice['answer'] = translate_to_indonesia_short(choice['answer'])
 
             output["questions"].append({
                 "question": question_text,
@@ -247,6 +247,10 @@ def translate_to_indonesia(text):
 def translate_to_english(text):
     id_translator = GoogleTranslator(source='id', target='en')
     return id_translator.translate(text)
+
+def translate_to_indonesia_short(text):
+    en_translator = GoogleTranslator(source='en', target='id')
+    return en_translator.translate(text)
 
 
 @app.route('/query', methods=['POST'])
